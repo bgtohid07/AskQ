@@ -10,14 +10,24 @@ export function QRCodeCard({ url }: { url?: string }) {
   const [profileUrl, setProfileUrl] = useState("https://myapp.com/");
 
   useEffect(() => {
-    // Generate the production URL dynamically based on the current window location
-    // or fallback to the provided URL.
+    // Prioritize production URL over localhost if available
     if (typeof window !== "undefined") {
+      let base = window.location.origin;
+      if (process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL) {
+        base = `https://${process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL}`;
+      } else if (process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes("localhost")) {
+        base = process.env.NEXT_PUBLIC_APP_URL;
+      }
+      
       const activeUser = user.dbUser || user.firebaseUser;
       if (activeUser?.username) {
-         setProfileUrl(`${window.location.origin}/@${activeUser.username}`);
+         setProfileUrl(`${base}/@${activeUser.username}`);
       } else if (url) {
-         setProfileUrl(url);
+         // Replace localhost in provided URL if we know the production base
+         const finalUrl = url.includes("localhost") && base.includes("https") 
+            ? url.replace(/http:\/\/localhost:\d+/, base) 
+            : url;
+         setProfileUrl(finalUrl);
       }
     }
   }, [user, url]);
