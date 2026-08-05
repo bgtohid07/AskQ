@@ -61,7 +61,9 @@ export function ProfileEditor() {
         throw new Error("Invalid image upload response");
       }
 
-      if (!res.ok) throw new Error(data.error || "Failed to upload image");
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || data.error || "Failed to upload image");
+      }
 
       await updateProfileInDb({ profilePicture: data.url });
       setProfilePicture(data.url);
@@ -112,11 +114,12 @@ export function ProfileEditor() {
       throw new Error("Server returned invalid response. Please try again.");
     }
     
-    if (!res.ok) {
-      throw new Error(resData.error || "Failed to update profile");
+    if (!res.ok || resData.success === false) {
+      throw new Error(resData.message || resData.error || "Failed to update profile");
     }
     
-    await updateProfile(resData);
+    const updatedUserObj = resData.user || resData;
+    await updateProfile(updatedUserObj);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -3,10 +3,9 @@ import prisma from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { askQuestionSchema } from '@/lib/validators';
 
-// Simple in-memory rate limiting for question submissions
 const rateLimitMap = new Map<string, { count: number; lastReset: number }>();
-const RATE_LIMIT_MAX_REQUESTS = 10; // Max 10 questions
-const RATE_LIMIT_WINDOW_MS = 60 * 1000; // per minute
+const RATE_LIMIT_MAX_REQUESTS = 10;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
@@ -34,7 +33,11 @@ export async function POST(req: Request) {
   try {
     const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
     if (ip !== 'unknown' && isRateLimited(ip)) {
-      return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 });
+      return NextResponse.json({
+        success: false,
+        message: 'Too many requests. Please try again in a minute.',
+        error: 'Too many requests. Please try again in a minute.'
+      }, { status: 429 });
     }
 
     const body = await req.json();
@@ -42,7 +45,7 @@ export async function POST(req: Request) {
 
     const cleanReceiverUsername = validatedData.receiverUsername.replace(/^%40/, '').replace(/^@/, '');
 
-    // 3. Find Receiver (exact or case-insensitive)
+    // Find Receiver (exact or case-insensitive)
     let receiver = await prisma.user.findUnique({
       where: { username: cleanReceiverUsername }
     });
@@ -69,10 +72,14 @@ export async function POST(req: Request) {
     }
 
     if (!receiver.acceptQuestions) {
-      return NextResponse.json({ error: 'User is not accepting questions right now' }, { status: 403 });
+      return NextResponse.json({
+        success: false,
+        message: 'User is not accepting questions right now',
+        error: 'User is not accepting questions right now'
+      }, { status: 403 });
     }
 
-    // 4. Create Question
+    // Create Question
     const question = await prisma.question.create({
       data: {
         senderName: validatedData.senderName,
@@ -81,7 +88,7 @@ export async function POST(req: Request) {
       }
     });
 
-    // 5. Create Notification
+    // Create Notification
     try {
       await prisma.notification.create({
         data: {
@@ -92,27 +99,41 @@ export async function POST(req: Request) {
         }
       });
     } catch (e) {
-      // Non-critical notification creation failure ignored
+      // Ignore notification creation error
     }
 
-    return NextResponse.json(question, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      message: 'Message sent successfully',
+      question
+    }, { status: 201 });
   } catch (error: any) {
-    if (error?.name === 'ZodError') {
-      return NextResponse.json({ error: error.errors?.[0]?.message || 'Invalid question data' }, { status: 400 });
+    console.error("POST /api/questions error:", error);
+    let errorMessage = "Internal server error";
+
+    if (error?.name === "ZodError" || error?.issues) {
+      const issues = error.issues || error.errors || [];
+      errorMessage = issues[0]?.message || "Invalid question data";
+      return NextResponse.json({ success: false, message: errorMessage, error: errorMessage }, { status: 400 });
     }
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+
+    if (typeof error?.message === "string") {
+      errorMessage = error.message;
+    }
+
+    return NextResponse.json({ success: false, message: errorMessage, error: errorMessage }, { status: 500 });
   }
 }
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getCurrentUser(req);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ success: false, message: 'Unauthorized', error: 'Unauthorized' }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
-    const filter = searchParams.get('filter'); // unread, replied
+    const filter = searchParams.get('filter');
     const query = searchParams.get('query');
     const page = parseInt(searchParams.get('page') || '1');
     const limit = 20;
@@ -143,6 +164,7 @@ export async function GET(req: Request) {
     const total = await prisma.question.count({ where });
 
     return NextResponse.json({
+      success: true,
       questions,
       pagination: {
         total,
@@ -152,6 +174,6 @@ export async function GET(req: Request) {
       }
     }, { status: 200 });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ success: false, message: error.message || 'Internal server error', error: error.message }, { status: 500 });
   }
 }

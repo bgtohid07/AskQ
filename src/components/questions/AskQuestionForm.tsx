@@ -54,12 +54,12 @@ export function AskQuestionForm({ receiverUsername = "user" }: AskQuestionFormPr
         throw new Error("Server returned an invalid response. Please try again.");
       }
 
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to send message");
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || data.error || "Failed to send message");
       }
 
       setSuccess(true);
-      toast.success(`Question sent to @${receiverUsername}!`);
+      toast.success(data.message || `Question sent to @${receiverUsername}!`);
     } catch (err: any) {
       toast.error(err.message || "Failed to send message.");
     } finally {

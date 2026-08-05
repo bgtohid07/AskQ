@@ -45,7 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
     }
 
     if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      return NextResponse.json({ success: false, message: 'User not found', error: 'User not found' }, { status: 404 });
     }
 
     const currentUser = await getCurrentUser(req);
@@ -63,10 +63,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
       isFollowing = !!follow;
     }
 
-    return NextResponse.json({ ...user, isFollowing }, { status: 200 });
+    return NextResponse.json({ success: true, ...user, isFollowing }, { status: 200 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ success: false, message, error: message }, { status: 500 });
   }
 }
 
@@ -77,7 +77,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
     
     const currentUser = await getCurrentUser(req);
     if (!currentUser) {
-      return NextResponse.json({ error: 'Unauthorized: Please log in again' }, { status: 401 });
+      return NextResponse.json({
+        success: false,
+        message: 'Unauthorized: Please log in again',
+        error: 'Unauthorized: Please log in again'
+      }, { status: 401 });
     }
 
     const body = await req.json();
@@ -90,7 +94,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
         }
       });
       if (existing && existing.id !== currentUser.id) {
-        return NextResponse.json({ error: 'Username is already taken' }, { status: 400 });
+        return NextResponse.json({
+          success: false,
+          message: 'Username is already taken',
+          error: 'Username is already taken'
+        }, { status: 400 });
       }
     }
 
@@ -109,15 +117,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
       }
     });
 
-    return NextResponse.json(updatedUser, { status: 200 });
+    return NextResponse.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: updatedUser,
+      ...updatedUser
+    }, { status: 200 });
   } catch (error: unknown) {
     console.error("PATCH /api/users/[username] error:", error);
     const err = error as any;
+    let errorMessage = 'Internal server error';
     if (err?.name === 'ZodError' || err?.issues) {
       const issues = err.issues || err.errors || [];
-      return NextResponse.json({ error: issues[0]?.message || 'Invalid profile data' }, { status: 400 });
+      errorMessage = issues[0]?.message || 'Invalid profile data';
+      return NextResponse.json({ success: false, message: errorMessage, error: errorMessage }, { status: 400 });
     }
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (typeof err?.message === 'string') {
+      errorMessage = err.message;
+    }
+    return NextResponse.json({ success: false, message: errorMessage, error: errorMessage }, { status: 500 });
   }
 }
