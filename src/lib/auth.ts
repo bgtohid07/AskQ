@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { adminAuth } from './firebase-admin';
 import prisma from './prisma';
 
-export async function getCurrentUser(req?: Request) {
+export async function getCurrentUser(req?: Request, targetUsername?: string) {
   try {
     let sessionCookie: string | undefined;
 
@@ -14,13 +14,23 @@ export async function getCurrentUser(req?: Request) {
       const cookieStore = await cookies();
       sessionCookie = cookieStore.get('session')?.value;
     }
-    
+
+    // First try finding user by targetUsername if provided
+    if (targetUsername) {
+      const cleanTarget = targetUsername.replace(/^%40/, '').replace(/^@/, '').trim();
+      if (cleanTarget) {
+        const u = await prisma.user.findFirst({
+          where: { username: { equals: cleanTarget, mode: 'insensitive' } }
+        });
+        if (u) return u;
+      }
+    }
+
     if (!sessionCookie) {
       return null;
     }
 
     const cleanId = sessionCookie.replace(/^%40/, '').replace(/^@/, '').trim();
-
     if (!cleanId) return null;
 
     // Direct lookup by session cookie / header value
@@ -53,44 +63,36 @@ export async function getCurrentUser(req?: Request) {
       return user;
     }
 
-    // Try firebase admin if session cookie is a JWT/Session token
-    try {
-      const decodedClaims = await adminAuth.verifySessionCookie(cleanId, true);
-      const fbUser = await prisma.user.findUnique({
-        where: { firebaseUid: decodedClaims.uid }
-      });
-      if (fbUser) return fbUser;
-    } catch (e) {
-      // Ignore firebase admin verification failure
+    // Auto-provision user in DB if missing, checking if username exists first
+    const cleanUsername = cleanId.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const validUsername = cleanUsername.length >= 3 ? cleanUsername : `user_${cleanId.substring(0, 6)}`;
+
+    let existingUser = await prisma.user.findFirst({
+      where: { username: { equals: validUsername, mode: 'insensitive' } }
+    });
+
+    if (existingUser) {
+      return existingUser;
     }
 
-    // Auto-provision user in DB if still missing so auth operations never fail silently
-    try {
-      const cleanUsername = cleanId.toLowerCase().replace(/[^a-z0-9_]/g, '');
-      const validUsername = cleanUsername.length >= 3 ? cleanUsername : `user_${cleanId.substring(0, 6)}`;
-      
-      let finalUsername = validUsername;
-      let count = 1;
-      while (await prisma.user.findUnique({ where: { username: finalUsername } })) {
-        finalUsername = `${validUsername}${count}`;
-        count++;
+    let finalUsername = validUsername;
+    let count = 1;
+    while (await prisma.user.findUnique({ where: { username: finalUsername } })) {
+      finalUsername = `${validUsername}${count}`;
+      count++;
+    }
+
+    user = await prisma.user.create({
+      data: {
+        firebaseUid: cleanId,
+        email: cleanId.includes('@') ? cleanId : `${finalUsername}@askq.app`,
+        name: finalUsername.charAt(0).toUpperCase() + finalUsername.slice(1),
+        username: finalUsername,
+        acceptQuestions: true
       }
+    });
 
-      user = await prisma.user.create({
-        data: {
-          firebaseUid: cleanId,
-          email: cleanId.includes('@') ? cleanId : `${finalUsername}@askq.app`,
-          name: finalUsername.charAt(0).toUpperCase() + finalUsername.slice(1),
-          username: finalUsername,
-          acceptQuestions: true
-        }
-      });
-      return user;
-    } catch (e) {
-      console.error("Auto-provision in getCurrentUser failed:", e);
-    }
-
-    return null;
+    return user;
   } catch (error) {
     console.error("getCurrentUser error:", error);
     return null;

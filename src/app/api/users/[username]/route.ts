@@ -48,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
       return NextResponse.json({ success: false, message: 'User not found', error: 'User not found' }, { status: 404 });
     }
 
-    const currentUser = await getCurrentUser(req);
+    const currentUser = await getCurrentUser(req, cleanUsername);
     let isFollowing = false;
 
     if (currentUser) {
@@ -75,7 +75,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
     const { username: paramUsername } = await params;
     const cleanUsername = paramUsername.replace(/^%40/, '').replace(/^@/, '');
     
-    const currentUser = await getCurrentUser(req);
+    const currentUser = await getCurrentUser(req, cleanUsername);
     if (!currentUser) {
       return NextResponse.json({
         success: false,

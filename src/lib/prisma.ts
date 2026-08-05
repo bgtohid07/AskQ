@@ -6,8 +6,6 @@ const defaultDbUrl = 'postgresql://neondb_owner:npg_nwkGQlzp87Tg@ep-wispy-wind-a
 
 const prismaClientSingleton = () => {
   const connectionString = process.env.DATABASE_URL || defaultDbUrl;
-  
-  // Neon PostgreSQL requires SSL in node pg.Pool
   const pool = new Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
@@ -15,7 +13,6 @@ const prismaClientSingleton = () => {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
   });
-
   const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
 };
