@@ -5,7 +5,6 @@ import { Button } from "../ui/Button";
 import { Camera, Trash2, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import toast from "react-hot-toast";
-import Image from "next/image";
 
 export function ProfileEditor() {
   const { user, updateProfile } = useAuth();
@@ -37,17 +36,14 @@ export function ProfileEditor() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate size (5MB)
     if (file.size > 5 * 1024 * 1024) {
       toast.error("Image size must be less than 5MB");
       return;
     }
 
-    // Preview
     const objectUrl = URL.createObjectURL(file);
     setProfilePicture(objectUrl);
 
-    // Upload immediately
     setUploading(true);
     const formData = new FormData();
     formData.append("file", file);
@@ -57,16 +53,21 @@ export function ProfileEditor() {
         method: "POST",
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (e) {
+        throw new Error("Invalid image upload response");
+      }
 
-      // We have the URL, now save it to the DB directly so it persists
+      if (!res.ok) throw new Error(data.error || "Failed to upload image");
+
       await updateProfileInDb({ profilePicture: data.url });
       setProfilePicture(data.url);
       toast.success("Profile picture updated!");
     } catch (err: any) {
       toast.error(err.message || "Failed to upload image");
-      // Revert preview
       setProfilePicture(user.dbUser?.profilePicture || null);
     } finally {
       setUploading(false);
@@ -97,21 +98,36 @@ export function ProfileEditor() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.error || "Failed to update profile");
+
+    const text = await res.text();
+    let resData: any = {};
+    try {
+      resData = text ? JSON.parse(text) : {};
+    } catch (e) {
+      throw new Error("Server returned invalid response. Please try again.");
     }
     
-    await updateProfile(data); // Refresh the context so Avatars update instantly
+    if (!res.ok) {
+      throw new Error(resData.error || "Failed to update profile");
+    }
+    
+    await updateProfile(resData);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) {
+      toast.error("Name is required");
+      return;
+    }
+    if (!username.trim() || username.length < 3) {
+      toast.error("Username must be at least 3 characters");
+      return;
+    }
+
     setLoading(true);
     try {
       await updateProfileInDb({ name, username, bio });
-      toast.success("Profile updated successfully!");
     } catch (err: any) {
       toast.error(err.message || "Something went wrong");
     } finally {

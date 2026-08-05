@@ -16,6 +16,7 @@ export type DbUser = {
   name: string;
   username: string;
   email: string;
+  firebaseUid?: string | null;
   bio?: string | null;
   profilePicture?: string | null;
   isVerified?: boolean;
@@ -41,12 +42,28 @@ export const AuthContext = createContext<AuthContextType>({} as AuthContextType)
 
 const STORAGE_KEY = "askq_user_session";
 
+async function syncUserWithDb(payload: { firebaseUid: string; email: string; name?: string; username?: string; profilePicture?: string }): Promise<DbUser | null> {
+  try {
+    const res = await fetch("/api/auth/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const dbUser = await res.json();
+      return dbUser;
+    }
+  } catch (e) {
+    console.error("Failed to sync user with DB", e);
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser>({ firebaseUser: null, dbUser: null, loading: true });
 
   // Load session on mount
   useEffect(() => {
-    // Check local storage for session fallback
     const savedUser = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     let localDbUser: DbUser | null = null;
     if (savedUser) {
@@ -62,15 +79,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (firebaseApiKey && firebaseApiKey !== "") {
       const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
         if (fbUser) {
-          const dbUser: DbUser = {
+          const synced = await syncUserWithDb({
+            firebaseUid: fbUser.uid,
+            email: fbUser.email || "",
+            name: fbUser.displayName || fbUser.email?.split("@")[0] || "User",
+            username: fbUser.email?.split("@")[0] || "user_" + fbUser.uid.substring(0, 5),
+            profilePicture: fbUser.photoURL || undefined,
+          });
+
+          const activeDbUser = synced || localDbUser || {
             id: fbUser.uid,
             name: fbUser.displayName || fbUser.email?.split("@")[0] || "User",
             username: fbUser.email?.split("@")[0] || "user_" + fbUser.uid.substring(0, 5),
             email: fbUser.email || "",
             profilePicture: fbUser.photoURL || null,
           };
-          setUser({ firebaseUser: fbUser, dbUser: localDbUser || dbUser, loading: false });
+
+          if (typeof window !== "undefined") {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(activeDbUser));
+            document.cookie = `session=${activeDbUser.firebaseUid || activeDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
+          }
+
+          setUser({ firebaseUser: fbUser, dbUser: activeDbUser, loading: false });
         } else if (localDbUser) {
+          document.cookie = `session=${localDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
           setUser({ firebaseUser: null, dbUser: localDbUser, loading: false });
         } else {
           setUser({ firebaseUser: null, dbUser: null, loading: false });
@@ -79,6 +111,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return () => unsubscribe();
     } else {
       // Dev mode fallback
+      if (localDbUser) {
+        document.cookie = `session=${localDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
+      }
       setUser({ firebaseUser: null, dbUser: localDbUser, loading: false });
     }
   }, []);
@@ -93,7 +128,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         uid = res.user.uid;
       }
 
-      const newDbUser: DbUser = {
+      const synced = await syncUserWithDb({
+        firebaseUid: uid,
+        email: data.email,
+        name: data.name,
+        username: data.username,
+        profilePicture: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.username}`,
+      });
+
+      const newDbUser: DbUser = synced || {
         id: uid,
         name: data.name,
         username: data.username.toLowerCase().replace(/[^a-z0-9_]/g, ""),
@@ -104,57 +147,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (typeof window !== "undefined") {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(newDbUser));
-        document.cookie = `session=${uid}; path=/; max-age=2592000; SameSite=Lax`;
+        document.cookie = `session=${newDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
       }
 
       setUser({ firebaseUser: null, dbUser: newDbUser, loading: false });
       toast.success("Account created successfully!");
       return true;
     } catch (error: any) {
-      // Dev fallback if Firebase fails
-      const fallbackUid = "usr_" + Date.now().toString(36);
-      const newDbUser: DbUser = {
-        id: fallbackUid,
-        name: data.name,
-        username: data.username.toLowerCase().replace(/[^a-z0-9_]/g, ""),
-        email: data.email,
-        profilePicture: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.username}`,
-        acceptQuestions: true,
-      };
-
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newDbUser));
-        document.cookie = `session=${fallbackUid}; path=/; max-age=2592000; SameSite=Lax`;
-      }
-
-      setUser({ firebaseUser: null, dbUser: newDbUser, loading: false });
-      toast.success("Account created successfully!");
-      return true;
+      toast.error(error.message || "Failed to sign up");
+      return false;
     }
   };
 
   const login = async (email: string, pass: string): Promise<boolean> => {
     try {
       const firebaseApiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+      let uid = "usr_" + Date.now().toString(36);
 
       if (firebaseApiKey && firebaseApiKey !== "") {
-        await signInWithEmailAndPassword(auth, email, pass);
+        const res = await signInWithEmailAndPassword(auth, email, pass);
+        uid = res.user.uid;
       }
 
-      const username = email.split("@")[0];
-      const uid = "usr_" + Date.now().toString(36);
-      const dbUser: DbUser = {
-        id: uid,
-        name: username.charAt(0).toUpperCase() + username.slice(1),
-        username: username,
+      const synced = await syncUserWithDb({
+        firebaseUid: uid,
         email: email,
-        profilePicture: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
+        name: email.split("@")[0],
+        username: email.split("@")[0],
+      });
+
+      const dbUser: DbUser = synced || {
+        id: uid,
+        name: email.split("@")[0],
+        username: email.split("@")[0],
+        email: email,
+        profilePicture: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email.split("@")[0]}`,
         acceptQuestions: true,
       };
 
       if (typeof window !== "undefined") {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(dbUser));
-        document.cookie = `session=${uid}; path=/; max-age=2592000; SameSite=Lax`;
+        document.cookie = `session=${dbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
       }
 
       setUser({ firebaseUser: null, dbUser, loading: false });
@@ -182,11 +215,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         uid = res.user.uid;
       }
 
-      const username = email.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "");
-      const dbUser: DbUser = {
+      const rawUsername = email.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "");
+
+      const synced = await syncUserWithDb({
+        firebaseUid: uid,
+        email,
+        name,
+        username: rawUsername,
+        profilePicture: photoURL,
+      });
+
+      const dbUser: DbUser = synced || {
         id: uid,
         name,
-        username,
+        username: rawUsername,
         email,
         profilePicture: photoURL,
         acceptQuestions: true,
@@ -194,32 +236,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (typeof window !== "undefined") {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(dbUser));
-        document.cookie = `session=${uid}; path=/; max-age=2592000; SameSite=Lax`;
+        document.cookie = `session=${dbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
       }
 
       setUser({ firebaseUser: null, dbUser, loading: false });
       toast.success("Signed in with Google!");
       return true;
     } catch (error: any) {
-      // Fallback for Google sign in in local environment
-      const uid = "google_" + Date.now().toString(36);
-      const dbUser: DbUser = {
-        id: uid,
-        name: "Google User",
-        username: "google_user_" + uid.substring(7, 12),
-        email: "googleuser@example.com",
-        profilePicture: "https://api.dicebear.com/7.x/avataaars/svg?seed=google",
-        acceptQuestions: true,
-      };
-
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(dbUser));
-        document.cookie = `session=${uid}; path=/; max-age=2592000; SameSite=Lax`;
-      }
-
-      setUser({ firebaseUser: null, dbUser, loading: false });
-      toast.success("Signed in with Google!");
-      return true;
+      toast.error(error.message || "Failed to sign in with Google");
+      return false;
     }
   };
 
@@ -244,6 +269,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updated = { ...user.dbUser, ...data };
     if (typeof window !== "undefined") {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      if (updated.username) {
+        document.cookie = `session=${updated.id}; path=/; max-age=2592000; SameSite=Lax`;
+      }
     }
     setUser({ ...user, dbUser: updated });
     toast.success("Profile updated");
