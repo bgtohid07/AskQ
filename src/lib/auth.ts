@@ -19,7 +19,9 @@ export async function getCurrentUser(req?: Request) {
       return null;
     }
 
-    const cleanId = sessionCookie.replace(/^%40/, '').replace(/^@/, '');
+    const cleanId = sessionCookie.replace(/^%40/, '').replace(/^@/, '').trim();
+
+    if (!cleanId) return null;
 
     // Direct lookup by session cookie / header value
     let user = await prisma.user.findFirst({
@@ -62,8 +64,35 @@ export async function getCurrentUser(req?: Request) {
       // Ignore firebase admin verification failure
     }
 
+    // Auto-provision user in DB if still missing so auth operations never fail silently
+    try {
+      const cleanUsername = cleanId.toLowerCase().replace(/[^a-z0-9_]/g, '');
+      const validUsername = cleanUsername.length >= 3 ? cleanUsername : `user_${cleanId.substring(0, 6)}`;
+      
+      let finalUsername = validUsername;
+      let count = 1;
+      while (await prisma.user.findUnique({ where: { username: finalUsername } })) {
+        finalUsername = `${validUsername}${count}`;
+        count++;
+      }
+
+      user = await prisma.user.create({
+        data: {
+          firebaseUid: cleanId,
+          email: cleanId.includes('@') ? cleanId : `${finalUsername}@askq.app`,
+          name: finalUsername.charAt(0).toUpperCase() + finalUsername.slice(1),
+          username: finalUsername,
+          acceptQuestions: true
+        }
+      });
+      return user;
+    } catch (e) {
+      console.error("Auto-provision in getCurrentUser failed:", e);
+    }
+
     return null;
   } catch (error) {
+    console.error("getCurrentUser error:", error);
     return null;
   }
 }

@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { askQuestionSchema } from '@/lib/validators';
 
 const rateLimitMap = new Map<string, { count: number; lastReset: number }>();
-const RATE_LIMIT_MAX_REQUESTS = 10;
+const RATE_LIMIT_MAX_REQUESTS = 20;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 function isRateLimited(ip: string): boolean {
@@ -43,9 +43,9 @@ export async function POST(req: Request) {
     const body = await req.json();
     const validatedData = askQuestionSchema.parse(body);
 
-    const cleanReceiverUsername = validatedData.receiverUsername.replace(/^%40/, '').replace(/^@/, '');
+    const cleanReceiverUsername = validatedData.receiverUsername.replace(/^%40/, '').replace(/^@/, '').trim();
 
-    // Find Receiver (exact or case-insensitive)
+    // 1. Find Receiver (exact or case-insensitive)
     let receiver = await prisma.user.findUnique({
       where: { username: cleanReceiverUsername }
     });
@@ -58,17 +58,40 @@ export async function POST(req: Request) {
       });
     }
 
-    // Auto-create receiver record if missing so question submission always succeeds
+    // 2. Auto-create receiver record safely if missing so question submission ALWAYS succeeds
     if (!receiver) {
-      receiver = await prisma.user.create({
-        data: {
-          firebaseUid: `user_${cleanReceiverUsername}`,
-          email: `${cleanReceiverUsername}@askq.app`,
-          name: cleanReceiverUsername.charAt(0).toUpperCase() + cleanReceiverUsername.slice(1),
-          username: cleanReceiverUsername.toLowerCase(),
-          acceptQuestions: true
+      const lowerUsername = cleanReceiverUsername.toLowerCase();
+      try {
+        let finalUsername = lowerUsername;
+        let count = 1;
+        while (await prisma.user.findUnique({ where: { username: finalUsername } })) {
+          finalUsername = `${lowerUsername}${count}`;
+          count++;
         }
-      });
+
+        receiver = await prisma.user.create({
+          data: {
+            firebaseUid: `uid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            email: `${finalUsername}@askq.app`,
+            name: cleanReceiverUsername.charAt(0).toUpperCase() + cleanReceiverUsername.slice(1),
+            username: finalUsername,
+            acceptQuestions: true
+          }
+        });
+      } catch (e) {
+        console.error("Auto-creation of receiver failed:", e);
+        receiver = await prisma.user.findFirst({
+          where: { username: { equals: lowerUsername, mode: 'insensitive' } }
+        });
+      }
+    }
+
+    if (!receiver) {
+      return NextResponse.json({
+        success: false,
+        message: 'User profile not found. Please try again.',
+        error: 'User profile not found'
+      }, { status: 404 });
     }
 
     if (!receiver.acceptQuestions) {
@@ -79,7 +102,7 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
 
-    // Create Question
+    // 3. Create Question in DB
     const question = await prisma.question.create({
       data: {
         senderName: validatedData.senderName,
@@ -88,7 +111,7 @@ export async function POST(req: Request) {
       }
     });
 
-    // Create Notification
+    // 4. Create Notification
     try {
       await prisma.notification.create({
         data: {
@@ -99,7 +122,7 @@ export async function POST(req: Request) {
         }
       });
     } catch (e) {
-      // Ignore notification creation error
+      // Ignore notification creation failure
     }
 
     return NextResponse.json({
@@ -109,7 +132,7 @@ export async function POST(req: Request) {
     }, { status: 201 });
   } catch (error: any) {
     console.error("POST /api/questions error:", error);
-    let errorMessage = "Internal server error";
+    let errorMessage = "Failed to send message";
 
     if (error?.name === "ZodError" || error?.issues) {
       const issues = error.issues || error.errors || [];

@@ -50,8 +50,8 @@ async function syncUserWithDb(payload: { firebaseUid: string; email: string; nam
       body: JSON.stringify(payload),
     });
     if (res.ok) {
-      const dbUser = await res.json();
-      return dbUser;
+      const data = await res.json();
+      return data.user || data;
     }
   } catch (e) {
     console.error("Failed to sync user with DB", e);
@@ -72,6 +72,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         localStorage.removeItem(STORAGE_KEY);
       }
+    }
+
+    if (localDbUser) {
+      document.cookie = `session=${localDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
+      
+      // Sync local user with DB on load
+      syncUserWithDb({
+        firebaseUid: localDbUser.firebaseUid || localDbUser.id,
+        email: localDbUser.email,
+        name: localDbUser.name,
+        username: localDbUser.username,
+        profilePicture: localDbUser.profilePicture || undefined
+      }).then((synced) => {
+        if (synced) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(synced));
+          setUser(prev => ({ ...prev, dbUser: synced, loading: false }));
+        }
+      });
     }
 
     const firebaseApiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
@@ -97,12 +115,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (typeof window !== "undefined") {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(activeDbUser));
-            document.cookie = `session=${activeDbUser.firebaseUid || activeDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
+            document.cookie = `session=${activeDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
           }
 
           setUser({ firebaseUser: fbUser, dbUser: activeDbUser, loading: false });
         } else if (localDbUser) {
-          document.cookie = `session=${localDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
           setUser({ firebaseUser: null, dbUser: localDbUser, loading: false });
         } else {
           setUser({ firebaseUser: null, dbUser: null, loading: false });
@@ -110,10 +127,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       return () => unsubscribe();
     } else {
-      // Dev mode fallback
-      if (localDbUser) {
-        document.cookie = `session=${localDbUser.id}; path=/; max-age=2592000; SameSite=Lax`;
-      }
       setUser({ firebaseUser: null, dbUser: localDbUser, loading: false });
     }
   }, []);
@@ -274,7 +287,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
     setUser({ ...user, dbUser: updated });
-    toast.success("Profile updated");
+    toast.success("Profile updated successfully!");
   };
 
   return (
