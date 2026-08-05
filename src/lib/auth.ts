@@ -2,23 +2,33 @@ import { cookies } from 'next/headers';
 import { adminAuth } from './firebase-admin';
 import prisma from './prisma';
 
-export async function getCurrentUser() {
+export async function getCurrentUser(req?: Request) {
   try {
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get('session')?.value;
+    let sessionCookie: string | undefined;
+
+    if (req) {
+      sessionCookie = req.headers.get('x-user-id') || req.headers.get('authorization')?.replace('Bearer ', '');
+    }
+
+    if (!sessionCookie) {
+      const cookieStore = await cookies();
+      sessionCookie = cookieStore.get('session')?.value;
+    }
     
     if (!sessionCookie) {
       return null;
     }
 
-    // Direct lookup by session cookie value (could be firebaseUid, id, email, or username)
-    const user = await prisma.user.findFirst({
+    const cleanId = sessionCookie.replace(/^%40/, '').replace(/^@/, '');
+
+    // Direct lookup by session cookie / header value
+    let user = await prisma.user.findFirst({
       where: {
         OR: [
-          { firebaseUid: sessionCookie },
-          { id: sessionCookie },
-          { email: sessionCookie },
-          { username: sessionCookie }
+          { id: cleanId },
+          { firebaseUid: cleanId },
+          { email: cleanId },
+          { username: cleanId }
         ]
       }
     });
@@ -27,9 +37,23 @@ export async function getCurrentUser() {
       return user;
     }
 
-    // Firebase Admin Session Cookie verification fallback
+    // Fallback: case-insensitive username / email lookup
+    user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: cleanId, mode: 'insensitive' } },
+          { email: { equals: cleanId, mode: 'insensitive' } }
+        ]
+      }
+    });
+
+    if (user) {
+      return user;
+    }
+
+    // Try firebase admin if session cookie is a JWT/Session token
     try {
-      const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
+      const decodedClaims = await adminAuth.verifySessionCookie(cleanId, true);
       const fbUser = await prisma.user.findUnique({
         where: { firebaseUid: decodedClaims.uid }
       });

@@ -8,7 +8,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
     const { username } = await params;
     const cleanUsername = username.replace(/^%40/, '').replace(/^@/, '');
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { username: cleanUsername },
       select: {
         id: true,
@@ -25,10 +25,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
     });
 
     if (!user) {
+      user = await prisma.user.findFirst({
+        where: {
+          username: { equals: cleanUsername, mode: 'insensitive' }
+        },
+        select: {
+          id: true,
+          name: true,
+          username: true,
+          bio: true,
+          profilePicture: true,
+          isVerified: true,
+          acceptQuestions: true,
+          _count: {
+            select: { followers: true, following: true, receivedQuestions: true }
+          }
+        }
+      });
+    }
+
+    if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const currentUser = await getCurrentUser();
+    const currentUser = await getCurrentUser(req);
     let isFollowing = false;
 
     if (currentUser) {
@@ -55,17 +75,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
     const { username: paramUsername } = await params;
     const cleanUsername = paramUsername.replace(/^%40/, '').replace(/^@/, '');
     
-    const currentUser = await getCurrentUser();
+    const currentUser = await getCurrentUser(req);
     if (!currentUser) {
-      return NextResponse.json({ error: 'Unauthorized: Please log in' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized: Please log in again' }, { status: 401 });
     }
 
     const body = await req.json();
     const validatedData = updateProfileSchema.parse(body);
 
-    if (validatedData.username && validatedData.username !== currentUser.username) {
-      const existing = await prisma.user.findUnique({
-        where: { username: validatedData.username }
+    if (validatedData.username && validatedData.username.toLowerCase() !== currentUser.username.toLowerCase()) {
+      const existing = await prisma.user.findFirst({
+        where: {
+          username: { equals: validatedData.username, mode: 'insensitive' }
+        }
       });
       if (existing && existing.id !== currentUser.id) {
         return NextResponse.json({ error: 'Username is already taken' }, { status: 400 });
@@ -89,11 +111,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
 
     return NextResponse.json(updatedUser, { status: 200 });
   } catch (error: unknown) {
-    if (error && typeof error === 'object' && 'name' in error && error.name === 'ZodError') {
-      const zodErr = error as any;
-      return NextResponse.json({ error: zodErr.errors?.[0]?.message || 'Invalid input data' }, { status: 400 });
+    console.error("PATCH /api/users/[username] error:", error);
+    const err = error as any;
+    if (err?.name === 'ZodError' || err?.issues) {
+      const issues = err.issues || err.errors || [];
+      return NextResponse.json({ error: issues[0]?.message || 'Invalid profile data' }, { status: 400 });
     }
-    const message = error instanceof Error ? error.message : 'Internal server error';
+    const message = err instanceof Error ? err.message : 'Internal server error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

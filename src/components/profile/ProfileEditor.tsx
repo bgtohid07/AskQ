@@ -93,9 +93,14 @@ export function ProfileEditor() {
     const activeUser = user.dbUser || user.firebaseUser;
     if (!activeUser?.username) return;
 
+    const userIdentifier = activeUser.id || activeUser.firebaseUid || activeUser.username;
+
     const res = await fetch(`/api/users/${activeUser.username}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "x-user-id": userIdentifier,
+      },
       body: JSON.stringify(data),
     });
 
@@ -129,7 +134,7 @@ export function ProfileEditor() {
     try {
       await updateProfileInDb({ name, username, bio });
     } catch (err: any) {
-      toast.error(err.message || "Something went wrong");
+      toast.error(err.message || "Failed to update profile");
     } finally {
       setLoading(false);
     }

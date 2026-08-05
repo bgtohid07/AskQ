@@ -18,12 +18,16 @@ export function AskQuestionForm({ receiverUsername = "user" }: AskQuestionFormPr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!senderName.trim()) {
-      toast.error("Please enter your name.");
+    
+    const cleanName = senderName.trim();
+    const cleanContent = content.trim();
+
+    if (!cleanName || cleanName.length < 2) {
+      toast.error("Name must be at least 2 characters.");
       return;
     }
-    if (!content.trim()) {
-      toast.error("Please enter a question.");
+    if (!cleanContent) {
+      toast.error("Please enter your question.");
       return;
     }
 
@@ -34,8 +38,8 @@ export function AskQuestionForm({ receiverUsername = "user" }: AskQuestionFormPr
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          senderName: senderName.trim(),
-          content: content.trim(),
+          senderName: cleanName,
+          content: cleanContent,
           receiverUsername,
         }),
       });
@@ -46,22 +50,18 @@ export function AskQuestionForm({ receiverUsername = "user" }: AskQuestionFormPr
       try {
         data = dataText ? JSON.parse(dataText) : {};
       } catch (err) {
-        // If Vercel returns an HTML 500 error page, it won't be valid JSON
         console.error("Non-JSON response received:", dataText);
         throw new Error("Server returned an invalid response. Please try again.");
       }
 
       if (!res.ok) {
-        throw new Error(data.error || "Failed to send question");
+        throw new Error(data.error || "Failed to send message");
       }
 
       setSuccess(true);
       toast.success(`Question sent to @${receiverUsername}!`);
-      
-      // We don't clear the form if we show a success message, 
-      // but we could offer to send another.
     } catch (err: any) {
-      toast.error(err.message || "Failed to send question.");
+      toast.error(err.message || "Failed to send message.");
     } finally {
       setLoading(false);
     }
