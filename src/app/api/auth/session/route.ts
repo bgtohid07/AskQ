@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
 
 export async function POST(req: Request) {
   try {
@@ -10,15 +9,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing ID token' }, { status: 400 });
     }
 
-    const expiresIn = 60 * 60 * 24 * 5 * 1000; // 5 days
-    const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
-
+    const expiresIn = 60 * 60 * 24 * 30 * 1000;
     const cookieStore = await cookies();
-    cookieStore.set('session', sessionCookie, {
+    cookieStore.set('session', idToken, {
       maxAge: expiresIn / 1000,
-      httpOnly: true,
+      httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
       path: '/',
+      sameSite: 'lax',
     });
 
     return NextResponse.json({ success: true }, { status: 200 });

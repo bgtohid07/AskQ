@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
 
 export async function middleware(request: Request) {
   const url = new URL(request.url);

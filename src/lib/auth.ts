@@ -1,5 +1,4 @@
 import { cookies } from 'next/headers';
-import { adminAuth } from './firebase-admin';
 import prisma from './prisma';
 
 export async function getCurrentUser(req?: Request, targetUsername?: string) {
@@ -94,7 +93,7 @@ export async function getCurrentUser(req?: Request, targetUsername?: string) {
 
     return user;
   } catch (error) {
-    console.error("getCurrentUser error:", error);
+    console.error("[getCurrentUser ERROR]:", error);
     return null;
   }
 }
@@ -108,12 +107,7 @@ export async function verifyAuth() {
       return null;
     }
 
-    try {
-      const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
-      return decodedClaims;
-    } catch (e) {
-      return { uid: sessionCookie };
-    }
+    return { uid: sessionCookie };
   } catch (error) {
     return null;
   }
