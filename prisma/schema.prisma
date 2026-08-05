@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id              String   @id @default(cuid())
+  firebaseUid     String   @unique
+  email           String   @unique
+  name            String
+  username        String   @unique
+  bio             String?
+  profilePicture  String?
+  isVerified      Boolean  @default(false)
+  isAdmin         Boolean  @default(false)
+  acceptQuestions Boolean  @default(true)
+  fcmToken        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  sentQuestions     Question[]     @relation("SentQuestions")
+  receivedQuestions Question[]     @relation("ReceivedQuestions")
+  replies           Reply[]
+  notifications     Notification[]
+  blocking          BlockedUser[]  @relation("Blocker")
+  blockedBy         BlockedUser[]  @relation("Blocked")
+  reportsMade       Report[]       @relation("Reporter")
+  reportsReceived   Report[]       @relation("Reported")
+  following         Follow[]       @relation("Follower")
+  followers         Follow[]       @relation("Following")
+}
+
+model Question {
+  id         String   @id @default(cuid())
+  senderName String   @default("Anonymous Sender")
+  content    String
+  createdAt  DateTime @default(now())
+  isRead     Boolean  @default(false)
+  senderId   String?
+  sender     User?    @relation("SentQuestions", fields: [senderId], references: [id], onDelete: SetNull)
+  receiverId String
+  receiver   User     @relation("ReceivedQuestions", fields: [receiverId], references: [id], onDelete: Cascade)
+  reply      Reply?
+
+  @@index([receiverId])
+  @@index([senderId])
+}
+
+model Reply {
+  id         String   @id @default(cuid())
+  content    String
+  isPublic   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  questionId String   @unique
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  message   String
+  isRead    Boolean  @default(false)
+  data      Json?
+  createdAt DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model BlockedUser {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  blockerId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  reason     String
+  details    String?
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  reporterId String
+  reporter   User     @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId String
+  reported   User     @relation("Reported", fields: [reportedId], references: [id], onDelete: Cascade)
+
+  @@index([reporterId])
+  @@index([reportedId])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  followerId  String
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId String
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}

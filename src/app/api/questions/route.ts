@@ -1,0 +1,136 @@
+import { NextResponse } from 'next/server';
+import prisma from '@/lib/prisma';
+import { getCurrentUser } from '@/lib/auth';
+import { askQuestionSchema } from '@/lib/validators';
+
+// Simple in-memory rate limiting for question submissions
+const rateLimitMap = new Map<string, { count: number; lastReset: number }>();
+const RATE_LIMIT_MAX_REQUESTS = 5; // Max 5 questions
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // per minute
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const record = rateLimitMap.get(ip);
+
+  if (!record) {
+    rateLimitMap.set(ip, { count: 1, lastReset: now });
+    return false;
+  }
+
+  if (now - record.lastReset > RATE_LIMIT_WINDOW_MS) {
+    // Reset window
+    rateLimitMap.set(ip, { count: 1, lastReset: now });
+    return false;
+  }
+
+  if (record.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return true; // Rate limited
+  }
+
+  record.count += 1;
+  return false;
+}
+
+export async function POST(req: Request) {
+  try {
+    // 1. Rate Limiting
+    // Using a combination of headers for IP detection since Next.js doesn't provide a direct IP in standard Request
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
+    if (ip !== 'unknown' && isRateLimited(ip)) {
+      return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 });
+    }
+
+    // 2. Validation
+    const body = await req.json();
+    const validatedData = askQuestionSchema.parse(body);
+
+    // 3. Find Receiver
+    const receiver = await prisma.user.findUnique({
+      where: { username: validatedData.receiverUsername }
+    });
+
+    if (!receiver) {
+      return NextResponse.json({ error: 'Receiver not found' }, { status: 404 });
+    }
+
+    if (!receiver.acceptQuestions) {
+      return NextResponse.json({ error: 'User is not accepting questions right now' }, { status: 403 });
+    }
+
+    // 4. Create Question (Public/Anonymous allowed, but senderName is recorded)
+    const question = await prisma.question.create({
+      data: {
+        senderName: validatedData.senderName,
+        content: validatedData.content,
+        receiverId: receiver.id,
+        // senderId is null because this is a public submission
+      }
+    });
+
+    // 5. Create Notification
+    await prisma.notification.create({
+      data: {
+        type: 'NEW_QUESTION',
+        message: `You have a new question from ${validatedData.senderName}`,
+        userId: receiver.id,
+        data: { questionId: question.id }
+      }
+    });
+
+    return NextResponse.json(question, { status: 201 });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function GET(req: Request) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const filter = searchParams.get('filter'); // unread, replied
+    const query = searchParams.get('query');
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
+    const where: any = { receiverId: user.id };
+    
+    if (filter === 'unread') {
+      where.isRead = false;
+    } else if (filter === 'replied') {
+      where.reply = { isNot: null };
+    }
+
+    if (query) {
+      where.content = { contains: query, mode: 'insensitive' };
+    }
+
+    const questions = await prisma.question.findMany({
+      where,
+      include: {
+        reply: true
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    });
+
+    const total = await prisma.question.count({ where });
+
+    return NextResponse.json({
+      questions,
+      pagination: {
+        total,
+        pages: Math.ceil(total / limit),
+        page,
+        limit
+      }
+    }, { status: 200 });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+  }
+}
