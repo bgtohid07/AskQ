@@ -33,6 +33,7 @@ export async function POST(req: Request) {
   try {
     const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
     if (ip !== 'unknown' && isRateLimited(ip)) {
+      console.warn(`[POST /api/questions] Rate limit hit for IP: ${ip}`);
       return NextResponse.json({
         success: false,
         message: 'Too many requests. Please try again in a minute.',
@@ -78,8 +79,9 @@ export async function POST(req: Request) {
             acceptQuestions: true
           }
         });
+        console.log(`[POST /api/questions] Auto-created missing receiver: @${finalUsername}`);
       } catch (e) {
-        console.error("Auto-creation of receiver failed:", e);
+        console.error("[POST /api/questions] Auto-creation of receiver failed:", e);
         receiver = await prisma.user.findFirst({
           where: { username: { equals: lowerUsername, mode: 'insensitive' } }
         });
@@ -87,6 +89,7 @@ export async function POST(req: Request) {
     }
 
     if (!receiver) {
+      console.error(`[POST /api/questions ERROR]: Could not find or provision receiver '@${cleanReceiverUsername}'`);
       return NextResponse.json({
         success: false,
         message: 'User profile not found. Please try again.',
@@ -95,6 +98,7 @@ export async function POST(req: Request) {
     }
 
     if (!receiver.acceptQuestions) {
+      console.warn(`[POST /api/questions]: Receiver '@${receiver.username}' is not accepting questions`);
       return NextResponse.json({
         success: false,
         message: 'User is not accepting questions right now',
@@ -111,6 +115,8 @@ export async function POST(req: Request) {
       }
     });
 
+    console.log(`[POST /api/questions SUCCESS]: Created question ID ${question.id} for @${receiver.username}`);
+
     // 4. Create Notification
     try {
       await prisma.notification.create({
@@ -122,7 +128,7 @@ export async function POST(req: Request) {
         }
       });
     } catch (e) {
-      // Ignore notification creation failure
+      console.error("[POST /api/questions]: Notification creation failed:", e);
     }
 
     return NextResponse.json({
@@ -131,7 +137,7 @@ export async function POST(req: Request) {
       question
     }, { status: 201 });
   } catch (error: any) {
-    console.error("POST /api/questions error:", error);
+    console.error("[POST /api/questions CRITICAL ERROR]:", error);
     let errorMessage = "Failed to send message";
 
     if (error?.name === "ZodError" || error?.issues) {
@@ -152,6 +158,7 @@ export async function GET(req: Request) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
+      console.error("[GET /api/questions ERROR]: Unauthorized");
       return NextResponse.json({ success: false, message: 'Unauthorized', error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -197,6 +204,7 @@ export async function GET(req: Request) {
       }
     }, { status: 200 });
   } catch (error: any) {
+    console.error("[GET /api/questions ERROR]:", error);
     return NextResponse.json({ success: false, message: error.message || 'Internal server error', error: error.message }, { status: 500 });
   }
 }

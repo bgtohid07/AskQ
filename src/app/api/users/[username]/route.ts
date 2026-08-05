@@ -45,6 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
     }
 
     if (!user) {
+      console.warn(`[GET /api/users/${cleanUsername}] User not found in DB`);
       return NextResponse.json({ success: false, message: 'User not found', error: 'User not found' }, { status: 404 });
     }
 
@@ -65,6 +66,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
 
     return NextResponse.json({ success: true, ...user, isFollowing }, { status: 200 });
   } catch (error: unknown) {
+    console.error("[GET /api/users ERROR]:", error);
     const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json({ success: false, message, error: message }, { status: 500 });
   }
@@ -77,6 +79,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
     
     const currentUser = await getCurrentUser(req, cleanUsername);
     if (!currentUser) {
+      console.error(`[PATCH /api/users/${cleanUsername} ERROR]: Unauthorized - User not found or session missing`);
       return NextResponse.json({
         success: false,
         message: 'Unauthorized: Please log in again',
@@ -94,6 +97,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
         }
       });
       if (existing && existing.id !== currentUser.id) {
+        console.warn(`[PATCH /api/users/${cleanUsername}] Username '${validatedData.username}' is already taken`);
         return NextResponse.json({
           success: false,
           message: 'Username is already taken',
@@ -117,6 +121,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
       }
     });
 
+    console.log(`[PATCH /api/users/${cleanUsername} SUCCESS]: Profile updated for ${updatedUser.username}`);
+
     return NextResponse.json({
       success: true,
       message: 'Profile updated successfully',
@@ -124,7 +130,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
       ...updatedUser
     }, { status: 200 });
   } catch (error: unknown) {
-    console.error("PATCH /api/users/[username] error:", error);
+    console.error("[PATCH /api/users ERROR]:", error);
     const err = error as any;
     let errorMessage = 'Internal server error';
     if (err?.name === 'ZodError' || err?.issues) {
