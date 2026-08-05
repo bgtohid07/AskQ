@@ -15,6 +15,7 @@ export function ProfileEditor() {
 
   // Form State
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   
@@ -22,6 +23,7 @@ export function ProfileEditor() {
   useEffect(() => {
     if (user.dbUser) {
       setName(user.dbUser.name || "");
+      setUsername(user.dbUser.username || "");
       setBio(user.dbUser.bio || "");
       setProfilePicture(user.dbUser.profilePicture || null);
     }
@@ -108,7 +110,7 @@ export function ProfileEditor() {
     e.preventDefault();
     setLoading(true);
     try {
-      await updateProfileInDb({ name, bio });
+      await updateProfileInDb({ name, username, bio });
       toast.success("Profile updated successfully!");
     } catch (err: any) {
       toast.error(err.message || "Something went wrong");
@@ -181,9 +183,9 @@ export function ProfileEditor() {
         />
         <Input 
           label="Username" 
-          value={user.dbUser.username} 
-          disabled 
-          className="opacity-60 cursor-not-allowed" 
+          value={username} 
+          onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+          required 
         />
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium text-[var(--secondary)]">Bio</label>

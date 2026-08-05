@@ -8,17 +8,18 @@ import { Share2, QrCode, CheckCircle } from "lucide-react";
 interface ProfileHeaderProps {
   name: string;
   username: string;
-  bio?: string;
+  bio?: string | null;
+  profilePicture?: string | null;
   isVerified?: boolean;
   onShare?: () => void;
   onShowQR?: () => void;
 }
 
-export function ProfileHeader({ name, username, bio, isVerified, onShare, onShowQR }: ProfileHeaderProps) {
+export function ProfileHeader({ name, username, bio, profilePicture, isVerified, onShare, onShowQR }: ProfileHeaderProps) {
   return (
     <div className="flex flex-col items-center text-center space-y-4">
       <div className="relative">
-        <Avatar initials={name.charAt(0)} size="xl" isVerified={isVerified} />
+        <Avatar src={profilePicture} initials={name.charAt(0)} size="xl" isVerified={isVerified} />
         {isVerified && (
           <div className="absolute -bottom-2 -right-2 bg-blue-500 rounded-full p-1 border-2 border-[var(--background)]">
             <CheckCircle className="w-5 h-5 text-white" />

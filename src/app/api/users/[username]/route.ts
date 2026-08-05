@@ -59,6 +59,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
     const body = await req.json();
     const validatedData = updateProfileSchema.parse(body);
 
+    if (validatedData.username && validatedData.username !== user.username) {
+      const existing = await prisma.user.findUnique({
+        where: { username: validatedData.username }
+      });
+      if (existing) {
+        return NextResponse.json({ error: 'Username is already taken' }, { status: 400 });
+      }
+    }
+
     const updatedUser = await prisma.user.update({
       where: { username },
       data: validatedData,

@@ -40,7 +40,16 @@ export function AskQuestionForm({ receiverUsername = "user" }: AskQuestionFormPr
         }),
       });
 
-      const data = await res.json();
+      const dataText = await res.text();
+      let data: any = {};
+      
+      try {
+        data = dataText ? JSON.parse(dataText) : {};
+      } catch (err) {
+        // If Vercel returns an HTML 500 error page, it won't be valid JSON
+        console.error("Non-JSON response received:", dataText);
+        throw new Error("Server returned an invalid response. Please try again.");
+      }
 
       if (!res.ok) {
         throw new Error(data.error || "Failed to send question");

@@ -79,6 +79,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(question, { status: 201 });
   } catch (error: any) {
+    if (error?.name === 'ZodError') {
+       return NextResponse.json({ error: error.errors[0]?.message || 'Validation failed' }, { status: 400 });
+    }
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
